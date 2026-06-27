@@ -1,0 +1,67 @@
+---
+- name: Rollback Netdata from all nodes
+  hosts: all
+  become: true
+  remote_user: k3s
+
+  tasks:
+    - name: Stop and disable Netdata service
+      ansible.builtin.systemd:
+        name: netdata
+        enabled: false
+        state: stopped
+      ignore_errors: true
+
+    - name: Run official Netdata uninstaller
+      ansible.builtin.command:
+        cmd: /usr/libexec/netdata/netdata-uninstaller.sh --yes --env /etc/netdata/.environment
+        removes: /usr/libexec/netdata/netdata-uninstaller.sh
+      ignore_errors: true
+
+    - name: Remove Netdata config directory
+      ansible.builtin.file:
+        path: /etc/netdata
+        state: absent
+
+    - name: Remove Netdata lib directory
+      ansible.builtin.file:
+        path: /var/lib/netdata
+        state: absent
+
+    - name: Remove Netdata cache directory
+      ansible.builtin.file:
+        path: /var/cache/netdata
+        state: absent
+
+    - name: Remove Netdata log directory
+      ansible.builtin.file:
+        path: /var/log/netdata
+        state: absent
+
+    - name: Remove Netdata user
+      ansible.builtin.user:
+        name: netdata
+        state: absent
+      ignore_errors: true
+
+    - name: Remove Netdata group
+      ansible.builtin.group:
+        name: netdata
+        state: absent
+      ignore_errors: true
+
+    - name: Reload systemd daemon
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Verify Netdata service is gone
+      ansible.builtin.shell:
+        cmd: systemctl status netdata 2>&1 || true
+      register: service_status
+      changed_when: false
+
+    - name: Confirm rollback status
+      ansible.builtin.debug:
+        msg: >
+          Netdata removido de {{ inventory_hostname }}.
+          Status do serviço: {{ 'não encontrado' if 'could not be found' in service_status.stdout else service_status.stdout_lines[0] }}

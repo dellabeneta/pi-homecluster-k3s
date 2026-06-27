@@ -63,6 +63,12 @@ A partir deste momento toda a configuração é feita via Ansible. Acesse o dire
 
 **Dica de Validação:** O diretório `playbooks` possui scripts como `bootstrap-validate.sh`, `nodes-validate.sh` e `k3s-validate.sh` que podem ser executados após cada etapa para testar e garantir individualmente que o provisionamento ocorreu com sucesso em todos os nós.
 
+### 4. Monitoramento (opcional)
+
+O cluster pode ser monitorado via **Netdata** com dashboard em tempo real, arquitetura Parent-Child e notificações via Telegram. Este passo é independente e pode ser executado a qualquer momento após o cluster estar operacional.
+
+Consulte o guia completo em [monitoring/netdata/README.md](monitoring/netdata/README.md).
+
 VÍDEO NO ASCIINEMA: https://asciinema.org/a/oWqD12rdszhDPKR6
 
 

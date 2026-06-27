@@ -1,0 +1,185 @@
+---
+- name: Install Netdata on all nodes
+  hosts: all
+  become: true
+  remote_user: k3s
+  vars_files:
+    - vars/netdata_vault.yml
+  vars:
+    netdata_stream_api_key: "7d95fa2f-aa85-41bc-a6ba-fe27f9ce0323"
+    netdata_parent_ip: "192.168.18.240"
+
+  tasks:
+    - name: Download Netdata kickstart script
+      ansible.builtin.get_url:
+        url: https://get.netdata.cloud/kickstart.sh
+        dest: /tmp/kickstart.sh
+        mode: "0755"
+
+    - name: Install Netdata
+      ansible.builtin.command:
+        cmd: bash /tmp/kickstart.sh --dont-start-it
+        creates: /usr/sbin/netdata
+
+    - name: Remove kickstart script
+      ansible.builtin.file:
+        path: /tmp/kickstart.sh
+        state: absent
+
+- name: Configure Netdata on workers (children)
+  hosts: workers
+  become: true
+  remote_user: k3s
+  vars:
+    netdata_stream_api_key: "7d95fa2f-aa85-41bc-a6ba-fe27f9ce0323"
+    netdata_parent_ip: "192.168.18.240"
+
+  tasks:
+    - name: Configure netdata.conf (ram mode, dashboard local only)
+      ansible.builtin.copy:
+        dest: /etc/netdata/netdata.conf
+        content: |
+          [global]
+              update every = 5
+
+          [db]
+              mode = ram
+              retention = 3600
+
+          [web]
+              bind to = 127.0.0.1
+        owner: netdata
+        group: netdata
+        mode: "0640"
+
+    - name: Configure streaming to parent
+      ansible.builtin.copy:
+        dest: /etc/netdata/stream.conf
+        content: |
+          [stream]
+              enabled = yes
+              destination = {{ netdata_parent_ip }}:19999
+              api key = {{ netdata_stream_api_key }}
+              timeout seconds = 60
+              buffer size bytes = 1048576
+              reconnect delay seconds = 5
+        owner: netdata
+        group: netdata
+        mode: "0640"
+
+    - name: Enable and start Netdata
+      ansible.builtin.systemd:
+        name: netdata
+        enabled: true
+        state: restarted
+
+- name: Configure Netdata on control plane (parent)
+  hosts: control_plane
+  become: true
+  remote_user: k3s
+  vars_files:
+    - vars/netdata_vault.yml
+  vars:
+    netdata_stream_api_key: "7d95fa2f-aa85-41bc-a6ba-fe27f9ce0323"
+
+  tasks:
+    - name: Configure netdata.conf (dbengine, dashboard acessível na rede)
+      ansible.builtin.copy:
+        dest: /etc/netdata/netdata.conf
+        content: |
+          [global]
+              update every = 5
+
+          [db]
+              mode = dbengine
+              dbengine multihost disk space MB = 512
+
+          [web]
+              bind to = 0.0.0.0
+        owner: netdata
+        group: netdata
+        mode: "0640"
+
+    - name: Configure stream.conf to accept children
+      ansible.builtin.copy:
+        dest: /etc/netdata/stream.conf
+        content: |
+          [{{ netdata_stream_api_key }}]
+              enabled = yes
+              default memory mode = dbengine
+              health enabled by default = auto
+        owner: netdata
+        group: netdata
+        mode: "0640"
+
+    - name: Copy default alarm notify config
+      ansible.builtin.copy:
+        src: /usr/lib/netdata/conf.d/health_alarm_notify.conf
+        dest: /etc/netdata/health_alarm_notify.conf
+        remote_src: true
+        force: false
+        owner: netdata
+        group: netdata
+        mode: "0640"
+
+    - name: Configure Telegram notifications
+      ansible.builtin.lineinfile:
+        path: /etc/netdata/health_alarm_notify.conf
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - regexp: "^SEND_TELEGRAM="
+          line: 'SEND_TELEGRAM="YES"'
+        - regexp: "^TELEGRAM_BOT_TOKEN="
+          line: 'TELEGRAM_BOT_TOKEN="{{ telegram_bot_token }}"'
+        - regexp: "^DEFAULT_RECIPIENT_TELEGRAM="
+          line: 'DEFAULT_RECIPIENT_TELEGRAM="{{ telegram_chat_id }}"'
+
+    - name: Create health.d directory
+      ansible.builtin.file:
+        path: /etc/netdata/health.d
+        state: directory
+        owner: netdata
+        group: netdata
+        mode: "0755"
+
+    - name: Configure temperature alert
+      ansible.builtin.copy:
+        dest: /etc/netdata/health.d/temperature.conf
+        content: |
+          alarm: rpi_temperature
+             on: sensors.temperature_cpu_thermal-virtual-0_temp1_input
+           lookup: max -5s of input
+            units: Celsius
+            every: 30s
+             warn: $this > 50
+             crit: $this > 70
+          summary: Raspberry Pi temperature
+             info: CPU temperature
+               to: sysadmin
+        owner: netdata
+        group: netdata
+        mode: "0640"
+
+    - name: Enable and start Netdata
+      ansible.builtin.systemd:
+        name: netdata
+        enabled: true
+        state: restarted
+
+    - name: Wait for Netdata to be ready
+      ansible.builtin.wait_for:
+        port: 19999
+        host: 127.0.0.1
+        delay: 5
+        timeout: 60
+
+    - name: Test Telegram notification
+      ansible.builtin.command:
+        cmd: sudo -u netdata /usr/libexec/netdata/plugins.d/alarm-notify.sh test telegram
+      register: telegram_test
+      changed_when: false
+
+    - name: Show Telegram test result
+      ansible.builtin.debug:
+        msg: "{{ telegram_test.stdout_lines }}"
