@@ -6,15 +6,13 @@ USER="k3s"
 
 echo "Iniciando desligamento gracefully..."
 
-# 1. Para o Netdata nos workers (encerra o streaming antes do parent)
-for node in "${WORKERS[@]}"; do
-  echo "Parando Netdata em $node..."
-  ssh $USER@$node "sudo systemctl stop netdata"
-done
+# 1. Para o Grafana no control plane (evita alertas de serviço parado durante o desligamento)
+echo "Parando Grafana em $MASTER..."
+ssh $USER@$MASTER "sudo systemctl stop grafana-server"
 
-# 2. Para o Netdata no control plane (parent)
-echo "Parando Netdata em $MASTER..."
-ssh $USER@$MASTER "sudo systemctl stop netdata"
+# 2. Para o Prometheus no control plane (grava o banco de métricas no SD de forma limpa)
+echo "Parando Prometheus em $MASTER..."
+ssh $USER@$MASTER "sudo systemctl stop prometheus && sync"
 
 # 3. Encerra os agentes k3s dos Workers
 for node in "${WORKERS[@]}"; do
