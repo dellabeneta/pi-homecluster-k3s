@@ -1,0 +1,48 @@
+---
+# Religa o Netdata previamente desativado via netdata-disable.yml.
+# Sobe o parent primeiro para que os children já encontrem o destino do streaming.
+
+- name: Enable Netdata on control plane (parent)
+  hosts: control_plane
+  become: true
+  remote_user: k3s
+
+  tasks:
+    - name: Unmask, enable and start Netdata service
+      ansible.builtin.systemd:
+        name: netdata
+        masked: false
+        enabled: true
+        state: started
+
+    - name: Re-enable Netdata auto-updates
+      ansible.builtin.command:
+        cmd: /usr/libexec/netdata/netdata-updater.sh --enable-auto-updates
+        removes: /usr/libexec/netdata/netdata-updater.sh
+      changed_when: true
+
+    - name: Wait for Netdata to be ready
+      ansible.builtin.wait_for:
+        port: 19999
+        host: 127.0.0.1
+        delay: 5
+        timeout: 60
+
+- name: Enable Netdata on workers (children)
+  hosts: workers
+  become: true
+  remote_user: k3s
+
+  tasks:
+    - name: Unmask, enable and start Netdata service
+      ansible.builtin.systemd:
+        name: netdata
+        masked: false
+        enabled: true
+        state: started
+
+    - name: Re-enable Netdata auto-updates
+      ansible.builtin.command:
+        cmd: /usr/libexec/netdata/netdata-updater.sh --enable-auto-updates
+        removes: /usr/libexec/netdata/netdata-updater.sh
+      changed_when: true
