@@ -6,6 +6,8 @@ Bem-vindo ao projeto Pi Homecluster K3s. Este repositório contém toda a automa
 
 A automação foi inteiramente projetada para transformar placas "limpas" em um cluster de laboratório pronto para receber suas aplicações.
 
+Veja o provisionamento em ação no [Asciinema](https://asciinema.org/a/oWqD12rdszhDPKR6).
+
 ## Pré-requisitos
 
 | Ferramenta | Descrição |
@@ -49,7 +51,7 @@ Edite o arquivo `inventory.yml` na raiz do projeto para refletir a topologia da 
 | `worker01` | Worker Node | 192.168.18.242 |
 | `worker02` | Worker Node | 192.168.18.244 |
 
-Atualize os IPs na propriedade `ansible_host` de acordo com os IPs que você definiou usando o `flashcard.sh`.
+Atualize os IPs na propriedade `ansible_host` de acordo com os IPs que você definiu usando o `flashcard.sh`.
 
 ### 3. Execução dos Playbooks
 
@@ -63,14 +65,28 @@ A partir deste momento toda a configuração é feita via Ansible. Acesse o dire
 
 **Dica de Validação:** O diretório `playbooks` possui scripts como `bootstrap-validate.sh`, `nodes-validate.sh` e `k3s-validate.sh` que podem ser executados após cada etapa para testar e garantir individualmente que o provisionamento ocorreu com sucesso em todos os nós.
 
-### 4. Monitoramento (opcional)
+### 4. Observabilidade (opcional)
 
-O cluster pode ser monitorado via **Netdata** com dashboard em tempo real, arquitetura Parent-Child e notificações via Telegram. Este passo é independente e pode ser executado a qualquer momento após o cluster estar operacional.
+Métricas dos nodes, dashboards e alertas no Telegram. A stack roda direto nos hosts, fora do K3s, para continuar funcionando mesmo se o cluster cair. Este passo é independente e pode ser executado a qualquer momento após o cluster estar operacional.
 
-Consulte o guia completo em [monitoring-old/README.md](monitoring-old/README.md).
+| Componente | Onde roda | Papel |
+| :--- | :--- | :--- |
+| node_exporter | Todos os nodes | Coleta CPU, RAM, disco, rede, temperatura e estado dos serviços |
+| Prometheus | Control plane | Busca e armazena as métricas |
+| Grafana | Control plane | Dashboards e alertas no Telegram |
 
-VÍDEO NO ASCIINEMA: https://asciinema.org/a/oWqD12rdszhDPKR6
+Consulte o guia completo em [observability/README.md](observability/README.md).
 
+A stack anterior, baseada em Netdata, está desativada e guardada em [monitoring-old/](monitoring-old/README.md).
+
+### 5. Desligamento do cluster
+
+Para desligar o cluster com segurança, os scripts param os agentes dos workers, depois o server do control plane, e só então desligam as placas.
+
+| Script | Onde usar | Comando |
+| :--- | :--- | :--- |
+| `shutdown-k3s.sh` | Linux (bash) | `./shutdown-k3s.sh` |
+| `shutdown-k3s-posix.sh` | iSH no iPhone ou qualquer shell POSIX | `sh shutdown-k3s-posix.sh` |
 
 ## Conclusão
 

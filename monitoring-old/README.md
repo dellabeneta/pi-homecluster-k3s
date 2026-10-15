@@ -1,5 +1,10 @@
 # Netdata — Monitoramento do Cluster
 
+> [!WARNING]
+> **Legado.** Esta stack foi substituída por [observability/](../observability/README.md) e está desativada nos nodes (serviço parado e mascarado, configs preservadas). Mantida apenas para referência e para poder ser religada com `netdata-enable.yml`.
+>
+> A senha do vault original (`vars/netdata_vault.yml`) se perdeu. O `netdata-enable.yml` funciona sem ela, mas uma reinstalação completa com `netdata.yml` exige recriar o vault.
+
 Monitoramento do cluster K3s via Netdata, implementado na arquitetura **Parent-Child**:
 
 - **Control Plane** → Parent: recebe métricas de todos os nodes, armazena em disco (`dbengine`), expõe o dashboard na rede local na porta `19999`
@@ -7,14 +12,10 @@ Monitoramento do cluster K3s via Netdata, implementado na arquitetura **Parent-C
 
 Notificações de alerta via **Telegram**.
 
----
-
 ## Pré-requisitos
 
 - Cluster K3s provisionado (passos 1–3 do README principal)
 - Bot do Telegram criado via `@BotFather` com token e chat_id em mãos
-
----
 
 ## Configuração do Vault
 
@@ -39,8 +40,6 @@ telegram_bot_token: "SEU_TOKEN_AQUI"
 telegram_chat_id: "SEU_CHAT_ID_AQUI"
 ```
 
----
-
 ## Instalação
 
 ```bash
@@ -48,8 +47,6 @@ ansible-playbook -i inventory.yml monitoring-old/netdata.yml --vault-password-fi
 ```
 
 Ao final da execução, três mensagens de teste chegam no Telegram confirmando que o canal de notificação está operacional.
-
----
 
 ## Desativar / Reativar
 
@@ -67,8 +64,6 @@ Para religar (parent primeiro, depois os children):
 ansible-playbook -i inventory.yml monitoring-old/netdata-enable.yml
 ```
 
----
-
 ## Rollback
 
 Para remover completamente o Netdata de todos os nodes:
@@ -76,8 +71,6 @@ Para remover completamente o Netdata de todos os nodes:
 ```bash
 ansible-playbook -i inventory.yml monitoring-old/netdata-rollback.yml
 ```
-
----
 
 ## Dashboard
 
@@ -89,8 +82,6 @@ http://<IP_DO_CONTROL_PLANE>:19999
 
 O dashboard exibe métricas em tempo real dos 3 nodes consolidadas em uma única interface.
 
----
-
 ## Alertas ativos
 
 | Métrica | Warning | Critical |
@@ -99,8 +90,6 @@ O dashboard exibe métricas em tempo real dos 3 nodes consolidadas em uma única
 | RAM | 80% | 90% |
 | Disco | 80% | 95% |
 | Temperatura | 50°C | 70°C |
-
----
 
 ## Observações
 
