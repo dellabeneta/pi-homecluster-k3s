@@ -8,6 +8,8 @@
   hosts: control_plane
   become: true
   remote_user: k3s
+  vars_files:
+    - vars/telegram_vault.yml
   vars:
     grafana_version: "13.2.3"
     grafana_port: 3000
@@ -157,6 +159,56 @@
         group: grafana
         mode: "0644"
       with_fileglob: "dashboards/*.json"
+
+    # ========================================
+    # Alertas (Telegram)
+    # ========================================
+
+    - name: Create alerting provisioning directory
+      ansible.builtin.file:
+        path: /etc/grafana/provisioning/alerting
+        state: directory
+        owner: root
+        group: grafana
+        mode: "0750"
+
+    # Regras, template da mensagem e política de notificação versionados em
+    # observability/grafana/alerting/.
+    - name: Copy alerting provisioning files
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "/etc/grafana/provisioning/alerting/{{ item | basename }}"
+        owner: root
+        group: grafana
+        mode: "0640"
+      with_fileglob: "alerting/*.yml"
+      notify: Restart grafana
+
+    # Credenciais do bot vêm do vault (vars/telegram_vault.yml).
+    # no_log/diff: false evitam que o token apareça na saída do Ansible.
+    - name: Provision Telegram contact point
+      ansible.builtin.copy:
+        dest: /etc/grafana/provisioning/alerting/contact-points.yml
+        content: |
+          apiVersion: 1
+          contactPoints:
+            - orgId: 1
+              name: telegram-pi-cluster
+              receivers:
+                - uid: telegram-pi-cluster
+                  type: telegram
+                  disableResolveMessage: false
+                  settings:
+                    bottoken: "{{ telegram_bot_token }}"
+                    chatid: "{{ telegram_chat_id }}"
+                    parse_mode: HTML
+                    message: '{% raw %}{{ template "telegram.pi.message" . }}{% endraw %}'
+        owner: root
+        group: grafana
+        mode: "0640"
+      no_log: true
+      diff: false
+      notify: Restart grafana
 
     # ========================================
     # Serviço

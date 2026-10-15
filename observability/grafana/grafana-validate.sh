@@ -78,6 +78,12 @@ check "Datasource Prometheus provisionado" "$DATASOURCE" "^1$"
 DASHBOARD=$(ssh_run $CONTROLPLANE "test -s /var/lib/grafana/dashboards/node-exporter-full.json && echo presente")
 check "Dashboard Node Exporter Full presente" "$DASHBOARD" "presente"
 
+RULES=$(ssh_run $CONTROLPLANE "sudo grep -c '^ *- uid: pi-' /etc/grafana/provisioning/alerting/rules.yml")
+check "Regras de alerta provisionadas (13)" "$RULES" "^13$"
+
+CONTACT=$(ssh_run $CONTROLPLANE "sudo grep -c 'type: telegram' /etc/grafana/provisioning/alerting/contact-points.yml")
+check "Contact point Telegram provisionado" "$CONTACT" "^1$"
+
 ERRORS=$(ssh_run $CONTROLPLANE "sudo journalctl -u grafana-server -b --no-pager | grep -ci 'level=error.*provisioning'")
 check "Sem erros de provisioning no log" "$ERRORS" "^0$"
 
