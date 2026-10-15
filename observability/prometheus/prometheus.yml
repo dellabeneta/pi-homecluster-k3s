@@ -117,7 +117,8 @@
     # ========================================
 
     # Targets gerados a partir do inventory.yml: novo node no inventário = novo target.
-    # O label "instance" usa o hostname em vez de IP:porta, deixando os dashboards legíveis.
+    # O label "instance" usa o hostname em vez de IP:porta, deixando os dashboards legíveis;
+    # o IP fica preservado no label "ip".
     - name: Create prometheus.yml
       ansible.builtin.copy:
         dest: /etc/prometheus/prometheus.yml
@@ -141,6 +142,7 @@
                 - targets: ["{{ hostvars[host].ansible_host }}:{{ node_exporter_port }}"]
                   labels:
                     instance: {{ hostvars[host].hostname }}
+                    ip: {{ hostvars[host].ansible_host }}
           {% endfor %}
         owner: root
         group: prometheus

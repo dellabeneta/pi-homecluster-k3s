@@ -101,7 +101,7 @@
           ExecStart=/usr/local/bin/node_exporter \
               --web.listen-address=:{{ node_exporter_port }} \
               --collector.systemd \
-              --collector.systemd.unit-include=(k3s|k3s-agent|ssh|systemd-timesyncd)\\.service \
+              --collector.systemd.unit-include=(k3s|k3s-agent|ssh|systemd-timesyncd|cloudflared)\\.service \
               --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/kubelet/.+|var/lib/rancher/.+)($$|/) \
               --collector.netdev.device-exclude=^(veth.*|lo)$$
           Restart=on-failure
