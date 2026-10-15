@@ -1,0 +1,15 @@
+# Todos os alertas vão para o Telegram.
+# warning repete a cada 6h enquanto não resolver; critical a cada 1h.
+apiVersion: 1
+policies:
+  - orgId: 1
+    receiver: telegram-pi-cluster
+    group_by: ["alertname", "instance"]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 6h
+    routes:
+      - receiver: telegram-pi-cluster
+        object_matchers:
+          - ["severity", "=", "critical"]
+        repeat_interval: 1h

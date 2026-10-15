@@ -1,0 +1,466 @@
+# Gerado a partir da lista de alertas do projeto. Severidades: critical / warning.
+apiVersion: 1
+groups:
+- orgId: 1
+  name: pi-homecluster
+  folder: Pi Homecluster
+  interval: 1m
+  rules:
+  - uid: pi-node-down
+    title: Node down
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: max by (instance) (up{job="node"})
+        instant: true
+        range: false
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: lt
+            params:
+            - 1
+    noDataState: OK
+    execErrState: Error
+    for: 2m
+    labels:
+      severity: critical
+    annotations:
+      summary: node_exporter is not responding. The node may be off or unreachable.
+    isPaused: false
+  - uid: pi-k3s-down
+    title: K3s service down
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: max by (instance, name) (node_systemd_unit_state{job="node",name=~"k3s(-agent)?\.service",state="active"})
+        instant: true
+        range: false
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: lt
+            params:
+            - 1
+    noDataState: OK
+    execErrState: Error
+    for: 2m
+    labels:
+      severity: critical
+    annotations:
+      summary: '{{ $labels.name }} is not active.'
+    isPaused: false
+  - uid: pi-cloudflared-down
+    title: Cloudflare Tunnel down
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: max by (instance, name) (node_systemd_unit_state{job="node",name=~"cloudflared\.service",state="active"})
+        instant: true
+        range: false
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: lt
+            params:
+            - 1
+    noDataState: OK
+    execErrState: Error
+    for: 2m
+    labels:
+      severity: critical
+    annotations:
+      summary: cloudflared.service is not active. External access through the tunnel is down.
+    isPaused: false
+  - uid: pi-rootfs-readonly
+    title: Root filesystem read-only
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: max by (instance) (node_filesystem_readonly{job="node",mountpoint="/",fstype!="rootfs"})
+        instant: true
+        range: false
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 0
+    noDataState: OK
+    execErrState: Error
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: / was remounted read-only. This usually means the SD card is failing.
+    isPaused: false
+  - uid: pi-temperature-critical
+    title: Temperature critical
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: max by (instance) (node_thermal_zone_temp{job="node"})
+        instant: true
+        range: false
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 75
+    noDataState: OK
+    execErrState: Error
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: CPU temperature is {{ humanize $values.A.Value }} °C (critical above 75 °C).
+    isPaused: false
+  - uid: pi-disk-critical
+    title: Disk almost full
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: 100 * (1 - max by (instance) (node_filesystem_avail_bytes{job="node",mountpoint="/",fstype!="rootfs"}) / max by (instance) (node_filesystem_size_bytes{job="node",mountpoint="/",fstype!="rootfs"}))
+        instant: true
+        range: false
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 90
+    noDataState: OK
+    execErrState: Error
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: Root filesystem is {{ humanize $values.A.Value }}% full (critical above 90%).
+    isPaused: false
+  - uid: pi-ram-critical
+    title: RAM almost exhausted
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: 100 * (1 - sum by (instance) (node_memory_MemAvailable_bytes{job="node"}) / sum by (instance) (node_memory_MemTotal_bytes{job="node"}))
+        instant: true
+        range: false
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 90
+    noDataState: OK
+    execErrState: Error
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: RAM usage is {{ humanize $values.A.Value }}% (critical above 90%).
+    isPaused: false
+  - uid: pi-temperature-high
+    title: Temperature high
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: max by (instance) (node_thermal_zone_temp{job="node"})
+        instant: true
+        range: false
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: within_range
+            params:
+            - 65
+            - 75
+    noDataState: OK
+    execErrState: Error
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: CPU temperature is {{ humanize $values.A.Value }} °C (warning above 65 °C).
+    isPaused: false
+  - uid: pi-cpu-high
+    title: CPU usage high
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: 100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{job="node",mode="idle"}[5m])))
+        instant: true
+        range: false
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: gt
+            params:
+            - 85
+    noDataState: OK
+    execErrState: Error
+    for: 15m
+    labels:
+      severity: warning
+    annotations:
+      summary: CPU usage is {{ humanize $values.A.Value }}% for the last 15 minutes.
+    isPaused: false
+  - uid: pi-ram-high
+    title: RAM usage high
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: 100 * (1 - sum by (instance) (node_memory_MemAvailable_bytes{job="node"}) / sum by (instance) (node_memory_MemTotal_bytes{job="node"}))
+        instant: true
+        range: false
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: within_range
+            params:
+            - 80
+            - 90
+    noDataState: OK
+    execErrState: Error
+    for: 15m
+    labels:
+      severity: warning
+    annotations:
+      summary: RAM usage is {{ humanize $values.A.Value }}% (warning above 80%).
+    isPaused: false
+  - uid: pi-disk-high
+    title: Disk filling up
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: 100 * (1 - max by (instance) (node_filesystem_avail_bytes{job="node",mountpoint="/",fstype!="rootfs"}) / max by (instance) (node_filesystem_size_bytes{job="node",mountpoint="/",fstype!="rootfs"}))
+        instant: true
+        range: false
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: within_range
+            params:
+            - 80
+            - 90
+    noDataState: OK
+    execErrState: Error
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: Root filesystem is {{ humanize $values.A.Value }}% full (warning above 80%).
+    isPaused: false
+  - uid: pi-clock-unsynced
+    title: Clock not synchronized
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: min by (instance) (node_timex_sync_status{job="node"})
+        instant: true
+        range: false
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: lt
+            params:
+            - 1
+    noDataState: OK
+    execErrState: Error
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: NTP is not synchronized. K3s certificates depend on a correct clock.
+    isPaused: false
+  - uid: pi-node-rebooted
+    title: Node rebooted
+    condition: C
+    data:
+    - refId: A
+      relativeTimeRange:
+        from: 600
+        to: 0
+      datasourceUid: prometheus
+      model:
+        refId: A
+        expr: min by (instance) (time() - node_boot_time_seconds{job="node"})
+        instant: true
+        range: false
+        intervalMs: 1000
+        maxDataPoints: 43200
+    - refId: C
+      datasourceUid: __expr__
+      model:
+        refId: C
+        type: threshold
+        expression: A
+        conditions:
+        - evaluator:
+            type: lt
+            params:
+            - 600
+    noDataState: OK
+    execErrState: Error
+    for: 0s
+    labels:
+      severity: warning
+    annotations:
+      summary: Node booted {{ humanizeDuration $values.A.Value }} ago.
+    isPaused: false

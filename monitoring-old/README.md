@@ -29,7 +29,7 @@ openssl rand -base64 32 > .vault_pass
 **2. Criar o arquivo de variáveis criptografado:**
 
 ```bash
-ansible-vault create playbooks/vars/netdata_vault.yml --vault-password-file .vault_pass
+ansible-vault create monitoring-old/vars/netdata_vault.yml --vault-password-file .vault_pass
 ```
 
 Insira o conteúdo abaixo e salve:
@@ -44,10 +44,28 @@ telegram_chat_id: "SEU_CHAT_ID_AQUI"
 ## Instalação
 
 ```bash
-ansible-playbook -i inventory.yml playbooks/netdata.yml --vault-password-file .vault_pass
+ansible-playbook -i inventory.yml monitoring-old/netdata.yml --vault-password-file .vault_pass
 ```
 
 Ao final da execução, três mensagens de teste chegam no Telegram confirmando que o canal de notificação está operacional.
+
+---
+
+## Desativar / Reativar
+
+Para desligar o Netdata **sem desinstalar** (binários, configs, histórico do `dbengine` e credenciais do Telegram ficam preservados nos nodes):
+
+```bash
+ansible-playbook -i inventory.yml monitoring-old/netdata-disable.yml
+```
+
+O serviço é parado, desabilitado e mascarado (não sobe nem no boot nem por dependência), e as atualizações automáticas do Netdata são suspensas. A porta `19999` fica livre.
+
+Para religar (parent primeiro, depois os children):
+
+```bash
+ansible-playbook -i inventory.yml monitoring-old/netdata-enable.yml
+```
 
 ---
 
@@ -56,7 +74,7 @@ Ao final da execução, três mensagens de teste chegam no Telegram confirmando 
 Para remover completamente o Netdata de todos os nodes:
 
 ```bash
-ansible-playbook -i inventory.yml playbooks/netdata-rollback.yml
+ansible-playbook -i inventory.yml monitoring-old/netdata-rollback.yml
 ```
 
 ---

@@ -70,6 +70,7 @@
     - name: Enable and start Netdata
       ansible.builtin.systemd:
         name: netdata
+        masked: false
         enabled: true
         state: restarted
 
@@ -164,6 +165,7 @@
     - name: Enable and start Netdata
       ansible.builtin.systemd:
         name: netdata
+        masked: false
         enabled: true
         state: restarted
 

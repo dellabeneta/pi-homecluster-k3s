@@ -67,7 +67,7 @@ A partir deste momento toda a configuração é feita via Ansible. Acesse o dire
 
 O cluster pode ser monitorado via **Netdata** com dashboard em tempo real, arquitetura Parent-Child e notificações via Telegram. Este passo é independente e pode ser executado a qualquer momento após o cluster estar operacional.
 
-Consulte o guia completo em [monitoring/netdata/README.md](monitoring/netdata/README.md).
+Consulte o guia completo em [monitoring-old/README.md](monitoring-old/README.md).
 
 VÍDEO NO ASCIINEMA: https://asciinema.org/a/oWqD12rdszhDPKR6
 

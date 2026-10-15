@@ -1,0 +1,68 @@
+---
+# Desativa o Netdata sem desinstalar: binários, configs, histórico (dbengine)
+# e credenciais do Telegram permanecem nos nodes. Para religar, use netdata-enable.yml.
+
+- name: Disable Netdata on workers (children)
+  hosts: workers
+  become: true
+  remote_user: k3s
+
+  tasks:
+    - name: Disable Netdata auto-updates
+      ansible.builtin.command:
+        cmd: /usr/libexec/netdata/netdata-updater.sh --disable-auto-updates
+        removes: /usr/libexec/netdata/netdata-updater.sh
+      changed_when: true
+
+    - name: Stop, disable and mask Netdata service
+      ansible.builtin.systemd:
+        name: netdata
+        state: stopped
+        enabled: false
+        masked: true
+
+- name: Disable Netdata on control plane (parent)
+  hosts: control_plane
+  become: true
+  remote_user: k3s
+
+  tasks:
+    - name: Disable Netdata auto-updates
+      ansible.builtin.command:
+        cmd: /usr/libexec/netdata/netdata-updater.sh --disable-auto-updates
+        removes: /usr/libexec/netdata/netdata-updater.sh
+      changed_when: true
+
+    - name: Stop, disable and mask Netdata service
+      ansible.builtin.systemd:
+        name: netdata
+        state: stopped
+        enabled: false
+        masked: true
+
+    - name: Wait for dashboard port to be released
+      ansible.builtin.wait_for:
+        port: 19999
+        state: stopped
+        timeout: 30
+      when: not ansible_check_mode
+
+- name: Verify Netdata is disabled
+  hosts: all
+  become: true
+  remote_user: k3s
+
+  tasks:
+    - name: Verify (skipped in check mode)
+      when: not ansible_check_mode
+      block:
+        - name: Check Netdata service state
+          ansible.builtin.command:
+            cmd: systemctl is-enabled netdata
+          register: netdata_enabled
+          changed_when: false
+          failed_when: netdata_enabled.stdout != "masked"
+
+        - name: Confirm status
+          ansible.builtin.debug:
+            msg: "Netdata em {{ inventory_hostname }}: {{ netdata_enabled.stdout }} (configs e dados preservados)"

@@ -1,0 +1,275 @@
+---
+# Instala o Grafana OSS no control plane (fora do K3s) via repositório APT oficial.
+# Datasource (Prometheus) e dashboard (Node Exporter Full) são provisionados como
+# arquivos: o Grafana sobe pronto, sem configuração manual pela interface.
+# Interface web em http://<ip-do-controlplane>:3000 (primeiro login: admin/admin).
+
+- name: Install Grafana on control plane
+  hosts: control_plane
+  become: true
+  remote_user: k3s
+  vars_files:
+    - vars/telegram_vault.yml
+  vars:
+    grafana_version: "13.2.3"
+    grafana_port: 3000
+    # Endereço público (Cloudflare Tunnel + Access): base dos links que o Grafana gera
+    grafana_root_url: "https://grafana.dellabeneta.com"
+    prometheus_port: 9090
+    prometheus_scrape_interval: 15s
+    # Node Exporter Full (grafana.com/grafana/dashboards/1860), revisão fixa
+    node_exporter_dashboard_revision: 45
+    # Cada plugin de datasource roda como processo próprio (~30 MB cada) mesmo sem uso.
+    # Só o Prometheus é usado; os demais (e os apps que dependem deles) ficam desligados.
+    grafana_disabled_plugins:
+      - elasticsearch
+      - grafana-postgresql-datasource
+      - grafana-pyroscope-datasource
+      - influxdb
+      - jaeger
+      - loki
+      - mssql
+      - mysql
+      - opentsdb
+      - stackdriver
+      - tempo
+      - zipkin
+      - grafana-exploretraces-app
+      - grafana-lokiexplore-app
+      - grafana-pyroscope-app
+
+  handlers:
+    - name: Restart grafana
+      ansible.builtin.systemd:
+        name: grafana-server
+        daemon_reload: true
+        state: restarted
+      when: not ansible_check_mode
+
+  tasks:
+    # ========================================
+    # Repositório e pacote
+    # ========================================
+
+    - name: Download Grafana APT signing key
+      ansible.builtin.get_url:
+        url: https://apt.grafana.com/gpg.key
+        dest: /etc/apt/keyrings/grafana.asc
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Add Grafana APT repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/grafana.sources
+        content: |
+          Types: deb
+          URIs: https://apt.grafana.com
+          Suites: stable
+          Components: main
+          Signed-By: /etc/apt/keyrings/grafana.asc
+        owner: root
+        group: root
+        mode: "0644"
+      register: grafana_repo
+
+    # Versão fixada e pacote em hold: um "apt upgrade" não atualiza o Grafana
+    # por conta própria. Para atualizar, troque grafana_version e rode o playbook.
+    - name: Install Grafana package
+      ansible.builtin.apt:
+        name: "grafana={{ grafana_version }}"
+        state: present
+        update_cache: "{{ grafana_repo.changed }}"
+        allow_change_held_packages: true
+      register: grafana_pkg
+      when: not (ansible_check_mode and grafana_repo.changed)
+      notify: Restart grafana
+
+    - name: Hold Grafana package version
+      ansible.builtin.dpkg_selections:
+        name: grafana
+        selection: hold
+      when: not (ansible_check_mode and grafana_repo.changed)
+
+    # ========================================
+    # Provisioning
+    # ========================================
+
+    - name: Provision Prometheus datasource
+      ansible.builtin.copy:
+        dest: /etc/grafana/provisioning/datasources/prometheus.yml
+        content: |
+          apiVersion: 1
+          datasources:
+            - name: Prometheus
+              type: prometheus
+              uid: prometheus
+              access: proxy
+              url: http://localhost:{{ prometheus_port }}
+              isDefault: true
+              editable: false
+              jsonData:
+                timeInterval: {{ prometheus_scrape_interval }}
+        owner: root
+        group: grafana
+        mode: "0640"
+      notify: Restart grafana
+
+    - name: Provision dashboards provider
+      ansible.builtin.copy:
+        dest: /etc/grafana/provisioning/dashboards/pi-homecluster.yml
+        content: |
+          apiVersion: 1
+          providers:
+            - name: pi-homecluster
+              folder: Pi Homecluster
+              type: file
+              disableDeletion: true
+              allowUiUpdates: false
+              options:
+                path: /var/lib/grafana/dashboards
+        owner: root
+        group: grafana
+        mode: "0640"
+      notify: Restart grafana
+
+    - name: Create dashboards directory
+      ansible.builtin.file:
+        path: /var/lib/grafana/dashboards
+        state: directory
+        owner: grafana
+        group: grafana
+        mode: "0755"
+
+    # grafana.com recusa o HEAD que o get_url faz em check mode (HTTP 405).
+    - name: Download Node Exporter Full dashboard
+      ansible.builtin.get_url:
+        url: "https://grafana.com/api/dashboards/1860/revisions/{{ node_exporter_dashboard_revision }}/download"
+        dest: /var/lib/grafana/dashboards/node-exporter-full.json
+        owner: grafana
+        group: grafana
+        mode: "0644"
+      when: not ansible_check_mode
+
+    # Dashboards próprios versionados em observability/grafana/dashboards/.
+    # O Grafana relê a pasta sozinho, sem restart.
+    - name: Copy project dashboards
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "/var/lib/grafana/dashboards/{{ item | basename }}"
+        owner: grafana
+        group: grafana
+        mode: "0644"
+      with_fileglob: "dashboards/*.json"
+
+    # ========================================
+    # Alertas (Telegram)
+    # ========================================
+
+    - name: Create alerting provisioning directory
+      ansible.builtin.file:
+        path: /etc/grafana/provisioning/alerting
+        state: directory
+        owner: root
+        group: grafana
+        mode: "0750"
+
+    # Regras, template da mensagem e política de notificação versionados em
+    # observability/grafana/alerting/.
+    - name: Copy alerting provisioning files
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "/etc/grafana/provisioning/alerting/{{ item | basename }}"
+        owner: root
+        group: grafana
+        mode: "0640"
+      with_fileglob: "alerting/*.yml"
+      notify: Restart grafana
+
+    # Credenciais do bot vêm do vault (vars/telegram_vault.yml).
+    # no_log/diff: false evitam que o token apareça na saída do Ansible.
+    - name: Provision Telegram contact point
+      ansible.builtin.copy:
+        dest: /etc/grafana/provisioning/alerting/contact-points.yml
+        content: |
+          apiVersion: 1
+          contactPoints:
+            - orgId: 1
+              name: telegram-pi-cluster
+              receivers:
+                - uid: telegram-pi-cluster
+                  type: telegram
+                  disableResolveMessage: false
+                  settings:
+                    bottoken: "{{ telegram_bot_token }}"
+                    chatid: "{{ telegram_chat_id }}"
+                    parse_mode: HTML
+                    message: '{% raw %}{{ template "telegram.pi.message" . }}{% endraw %}'
+        owner: root
+        group: grafana
+        mode: "0640"
+      no_log: true
+      diff: false
+      notify: Restart grafana
+
+    # ========================================
+    # Serviço
+    # ========================================
+
+    - name: Create grafana-server drop-in directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/grafana-server.service.d
+        state: directory
+        mode: "0755"
+
+    # Desliga telemetria e checagem de updates (o playbook controla a versão).
+    - name: Configure grafana-server environment
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/grafana-server.service.d/override.conf
+        content: |
+          [Service]
+          Environment=GF_SERVER_HTTP_PORT={{ grafana_port }}
+          Environment=GF_SERVER_ROOT_URL={{ grafana_root_url }}
+          Environment=GF_ANALYTICS_REPORTING_ENABLED=false
+          Environment=GF_ANALYTICS_CHECK_FOR_UPDATES=false
+          Environment=GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
+          Environment=GF_NEWS_NEWS_FEED_ENABLED=false
+          Environment=GF_PLUGINS_DISABLE_PLUGINS={{ grafana_disabled_plugins | join(',') }}
+          Environment=GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/pi-homecluster-overview.json
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart grafana
+
+    # No check mode o pacote não é instalado de verdade, então na primeira
+    # instalação o systemd ainda não conhece o serviço.
+    - name: Enable and start grafana-server
+      ansible.builtin.systemd:
+        name: grafana-server
+        daemon_reload: true
+        enabled: true
+        state: started
+      when: not (ansible_check_mode and (grafana_repo.changed or grafana_pkg.changed | default(false)))
+
+    - name: Apply pending restarts
+      ansible.builtin.meta: flush_handlers
+
+    # ========================================
+    # Validação
+    # ========================================
+
+    - name: Verify (skipped in check mode)
+      when: not ansible_check_mode
+      block:
+        - name: Wait for Grafana to be healthy
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ grafana_port }}/api/health"
+            return_content: true
+          register: grafana_health
+          until: grafana_health.status == 200 and grafana_health.json.database == "ok"
+          retries: 24
+          delay: 5
+
+        - name: Confirm status
+          ansible.builtin.debug:
+            msg: "Grafana {{ grafana_health.json.version }} ativo em http://{{ ansible_host }}:{{ grafana_port }}"

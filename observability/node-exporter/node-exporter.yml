@@ -1,0 +1,156 @@
+---
+# Instala o Prometheus node_exporter como serviço systemd em todos os nodes.
+# Roda direto no host (fora do K3s) para continuar coletando mesmo se o cluster cair.
+# Expõe as métricas em http://<ip-do-node>:9100/metrics
+
+- name: Install Prometheus node_exporter on all nodes
+  hosts: all
+  become: true
+  remote_user: k3s
+  vars:
+    node_exporter_version: "1.12.1"
+    node_exporter_arch: "{{ {'aarch64': 'arm64', 'armv7l': 'armv7', 'x86_64': 'amd64'}[ansible_facts['architecture']] }}"
+    node_exporter_release: "node_exporter-{{ node_exporter_version }}.linux-{{ node_exporter_arch }}"
+    node_exporter_url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}"
+    node_exporter_port: 9100
+
+  handlers:
+    - name: Restart node_exporter
+      ansible.builtin.systemd:
+        name: node_exporter
+        daemon_reload: true
+        state: restarted
+      when: not ansible_check_mode
+
+  tasks:
+    # ========================================
+    # Binário
+    # ========================================
+
+    - name: Check installed node_exporter version
+      ansible.builtin.command:
+        cmd: /usr/local/bin/node_exporter --version
+      register: node_exporter_installed
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Install node_exporter binary
+      when: node_exporter_version not in (node_exporter_installed.stdout | default('')) + (node_exporter_installed.stderr | default(''))
+      block:
+        - name: Download node_exporter release (checksum verified)
+          ansible.builtin.get_url:
+            url: "{{ node_exporter_url }}/{{ node_exporter_release }}.tar.gz"
+            dest: "/tmp/{{ node_exporter_release }}.tar.gz"
+            checksum: "sha256:{{ node_exporter_url }}/sha256sums.txt"
+            mode: "0644"
+
+        - name: Extract node_exporter release
+          ansible.builtin.unarchive:
+            src: "/tmp/{{ node_exporter_release }}.tar.gz"
+            dest: /tmp
+            remote_src: true
+          when: not ansible_check_mode
+
+        - name: Copy node_exporter binary to /usr/local/bin
+          ansible.builtin.copy:
+            src: "/tmp/{{ node_exporter_release }}/node_exporter"
+            dest: /usr/local/bin/node_exporter
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0755"
+          when: not ansible_check_mode
+          notify: Restart node_exporter
+
+        - name: Remove downloaded files
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "/tmp/{{ node_exporter_release }}.tar.gz"
+            - "/tmp/{{ node_exporter_release }}"
+
+    # ========================================
+    # Usuário e serviço
+    # ========================================
+
+    - name: Create node_exporter system user
+      ansible.builtin.user:
+        name: node_exporter
+        system: true
+        shell: /usr/sbin/nologin
+        create_home: false
+
+    # Exclusões evitam milhares de séries inúteis geradas pelo K3s:
+    # mounts de pods/containerd e interfaces veth criadas a cada pod.
+    # Em unit files do systemd, "$$" é um "$" literal e "\\." é um "\." literal.
+    - name: Create node_exporter systemd unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/node_exporter.service
+        content: |
+          [Unit]
+          Description=Prometheus node_exporter
+          Documentation=https://github.com/prometheus/node_exporter
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          User=node_exporter
+          Group=node_exporter
+          ExecStart=/usr/local/bin/node_exporter \
+              --web.listen-address=:{{ node_exporter_port }} \
+              --collector.systemd \
+              --collector.systemd.unit-include=(k3s|k3s-agent|ssh|systemd-timesyncd|cloudflared)\\.service \
+              --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/kubelet/.+|var/lib/rancher/.+)($$|/) \
+              --collector.netdev.device-exclude=^(veth.*|lo)$$
+          Restart=on-failure
+          RestartSec=5
+          NoNewPrivileges=true
+          ProtectSystem=full
+          ProtectHome=true
+
+          [Install]
+          WantedBy=multi-user.target
+        owner: root
+        group: root
+        mode: "0644"
+      register: node_exporter_unit
+      notify: Restart node_exporter
+
+    # No check mode a unit não é gravada de verdade, então na primeira
+    # instalação o systemd ainda não conhece o serviço.
+    - name: Enable and start node_exporter
+      ansible.builtin.systemd:
+        name: node_exporter
+        daemon_reload: true
+        enabled: true
+        state: started
+      when: not (ansible_check_mode and node_exporter_unit.changed)
+
+    - name: Apply pending restarts
+      ansible.builtin.meta: flush_handlers
+
+    # ========================================
+    # Validação
+    # ========================================
+
+    - name: Verify (skipped in check mode)
+      when: not ansible_check_mode
+      block:
+        - name: Wait for node_exporter port
+          ansible.builtin.wait_for:
+            port: "{{ node_exporter_port }}"
+            host: 127.0.0.1
+            timeout: 30
+
+        - name: Fetch metrics endpoint
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ node_exporter_port }}/metrics"
+            return_content: true
+          register: node_exporter_metrics
+          failed_when: "'node_exporter_build_info' not in node_exporter_metrics.content"
+
+        - name: Confirm status
+          ansible.builtin.debug:
+            msg: "node_exporter {{ node_exporter_version }} ativo em http://{{ ansible_host }}:{{ node_exporter_port }}/metrics"

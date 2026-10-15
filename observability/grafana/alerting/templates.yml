@@ -1,0 +1,17 @@
+# Formato da mensagem enviada ao Telegram (parse mode HTML).
+# 🔴 critical / 🟡 warning enquanto dispara, ✅ quando resolve.
+apiVersion: 1
+templates:
+  - orgId: 1
+    name: telegram-pi-cluster
+    template: |
+      {{ define "telegram.pi.message" }}
+      {{- range .Alerts }}
+      {{- if eq .Status "firing" }}{{ if eq .Labels.severity "critical" }}🔴{{ else }}🟡{{ end }} <b>{{ .Labels.severity | toUpper }}</b>
+      {{- else }}✅ <b>RESOLVED</b>{{ end }} · {{ .Labels.alertname }}
+      Host: <b>{{ .Labels.instance }}</b>
+      {{ .Annotations.summary }}
+      {{ if eq .Status "firing" }}Since: {{ .StartsAt.Local.Format "02/01 15:04" }}{{ else }}Resolved: {{ .EndsAt.Local.Format "02/01 15:04" }}{{ end }}
+
+      {{ end }}
+      {{- end }}

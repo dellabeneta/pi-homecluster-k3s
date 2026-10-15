@@ -1,0 +1,230 @@
+---
+# Instala o Prometheus como serviço systemd no control plane (fora do K3s).
+# Faz o scrape do node_exporter de todos os nodes do inventário.
+# Interface web e API em http://<ip-do-controlplane>:9090
+
+- name: Install Prometheus on control plane
+  hosts: control_plane
+  become: true
+  remote_user: k3s
+  vars:
+    prometheus_version: "3.15.0"
+    prometheus_arch: "{{ {'aarch64': 'arm64', 'armv7l': 'armv7', 'x86_64': 'amd64'}[ansible_facts['architecture']] }}"
+    prometheus_release: "prometheus-{{ prometheus_version }}.linux-{{ prometheus_arch }}"
+    prometheus_url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}"
+    prometheus_port: 9090
+    prometheus_scrape_interval: 15s
+    # Retenção: o que vencer primeiro (tempo ou tamanho) — protege o cartão SD
+    prometheus_retention_time: 15d
+    prometheus_retention_size: 2GB
+    node_exporter_port: 9100
+
+  handlers:
+    - name: Restart prometheus
+      ansible.builtin.systemd:
+        name: prometheus
+        daemon_reload: true
+        state: restarted
+      when: not ansible_check_mode
+
+    - name: Reload prometheus
+      ansible.builtin.systemd:
+        name: prometheus
+        state: reloaded
+      when: not ansible_check_mode
+
+  tasks:
+    # ========================================
+    # Binários
+    # ========================================
+
+    - name: Check installed Prometheus version
+      ansible.builtin.command:
+        cmd: /usr/local/bin/prometheus --version
+      register: prometheus_installed
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Install Prometheus binaries
+      when: prometheus_version not in (prometheus_installed.stdout | default('')) + (prometheus_installed.stderr | default(''))
+      block:
+        - name: Download Prometheus release (checksum verified)
+          ansible.builtin.get_url:
+            url: "{{ prometheus_url }}/{{ prometheus_release }}.tar.gz"
+            dest: "/tmp/{{ prometheus_release }}.tar.gz"
+            checksum: "sha256:{{ prometheus_url }}/sha256sums.txt"
+            mode: "0644"
+
+        - name: Extract Prometheus release
+          ansible.builtin.unarchive:
+            src: "/tmp/{{ prometheus_release }}.tar.gz"
+            dest: /tmp
+            remote_src: true
+          when: not ansible_check_mode
+
+        - name: Copy prometheus and promtool to /usr/local/bin
+          ansible.builtin.copy:
+            src: "/tmp/{{ prometheus_release }}/{{ item }}"
+            dest: "/usr/local/bin/{{ item }}"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0755"
+          loop:
+            - prometheus
+            - promtool
+          when: not ansible_check_mode
+          notify: Restart prometheus
+
+        - name: Remove downloaded files
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "/tmp/{{ prometheus_release }}.tar.gz"
+            - "/tmp/{{ prometheus_release }}"
+
+    # ========================================
+    # Usuário e diretórios
+    # ========================================
+
+    - name: Create prometheus system user
+      ansible.builtin.user:
+        name: prometheus
+        system: true
+        shell: /usr/sbin/nologin
+        create_home: false
+
+    - name: Create config directory
+      ansible.builtin.file:
+        path: /etc/prometheus
+        state: directory
+        owner: root
+        group: prometheus
+        mode: "0750"
+
+    - name: Create data directory
+      ansible.builtin.file:
+        path: /var/lib/prometheus
+        state: directory
+        owner: prometheus
+        group: prometheus
+        mode: "0750"
+
+    # ========================================
+    # Configuração
+    # ========================================
+
+    # Targets gerados a partir do inventory.yml: novo node no inventário = novo target.
+    # O label "instance" usa o hostname em vez de IP:porta, deixando os dashboards legíveis;
+    # o IP fica preservado no label "ip".
+    - name: Create prometheus.yml
+      ansible.builtin.copy:
+        dest: /etc/prometheus/prometheus.yml
+        content: |
+          global:
+            scrape_interval: {{ prometheus_scrape_interval }}
+            evaluation_interval: {{ prometheus_scrape_interval }}
+            external_labels:
+              cluster: pi-homecluster
+
+          scrape_configs:
+            - job_name: prometheus
+              static_configs:
+                - targets: ["localhost:{{ prometheus_port }}"]
+                  labels:
+                    instance: {{ hostvars[inventory_hostname].hostname }}
+
+            - job_name: node
+              static_configs:
+          {% for host in groups['all'] %}
+                - targets: ["{{ hostvars[host].ansible_host }}:{{ node_exporter_port }}"]
+                  labels:
+                    instance: {{ hostvars[host].hostname }}
+                    ip: {{ hostvars[host].ansible_host }}
+          {% endfor %}
+        owner: root
+        group: prometheus
+        mode: "0640"
+        validate: /usr/local/bin/promtool check config %s
+      notify: Reload prometheus
+
+    - name: Create prometheus systemd unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/prometheus.service
+        content: |
+          [Unit]
+          Description=Prometheus
+          Documentation=https://prometheus.io/docs/
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          User=prometheus
+          Group=prometheus
+          ExecStart=/usr/local/bin/prometheus \
+              --config.file=/etc/prometheus/prometheus.yml \
+              --storage.tsdb.path=/var/lib/prometheus \
+              --storage.tsdb.retention.time={{ prometheus_retention_time }} \
+              --storage.tsdb.retention.size={{ prometheus_retention_size }} \
+              --web.listen-address=:{{ prometheus_port }}
+          ExecReload=/bin/kill -HUP $MAINPID
+          Restart=on-failure
+          RestartSec=5
+          NoNewPrivileges=true
+          ProtectSystem=full
+          ProtectHome=true
+
+          [Install]
+          WantedBy=multi-user.target
+        owner: root
+        group: root
+        mode: "0644"
+      register: prometheus_unit
+      notify: Restart prometheus
+
+    # No check mode a unit não é gravada de verdade, então na primeira
+    # instalação o systemd ainda não conhece o serviço.
+    - name: Enable and start prometheus
+      ansible.builtin.systemd:
+        name: prometheus
+        daemon_reload: true
+        enabled: true
+        state: started
+      when: not (ansible_check_mode and prometheus_unit.changed)
+
+    - name: Apply pending restarts
+      ansible.builtin.meta: flush_handlers
+
+    # ========================================
+    # Validação
+    # ========================================
+
+    - name: Verify (skipped in check mode)
+      when: not ansible_check_mode
+      block:
+        - name: Wait for Prometheus to be ready
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ prometheus_port }}/-/ready"
+          register: prometheus_ready
+          until: prometheus_ready.status == 200
+          retries: 12
+          delay: 5
+
+        - name: Wait for all node_exporter targets to be up
+          ansible.builtin.uri:
+            url: "http://127.0.0.1:{{ prometheus_port }}/api/v1/query?query=sum(up%7Bjob%3D%22node%22%7D)"
+            return_content: true
+          register: prometheus_up
+          until: >-
+            prometheus_up.json.data.result | length > 0 and
+            prometheus_up.json.data.result[0].value[1] | int == groups['all'] | length
+          retries: 12
+          delay: 5
+
+        - name: Confirm status
+          ansible.builtin.debug:
+            msg: >-
+              Prometheus {{ prometheus_version }} ativo em http://{{ ansible_host }}:{{ prometheus_port }}
+              com {{ prometheus_up.json.data.result[0].value[1] }}/{{ groups['all'] | length }} node_exporters up
