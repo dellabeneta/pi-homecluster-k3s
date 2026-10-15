@@ -13,6 +13,8 @@
   vars:
     grafana_version: "13.2.3"
     grafana_port: 3000
+    # Endereço público (Cloudflare Tunnel + Access): base dos links que o Grafana gera
+    grafana_root_url: "https://grafana.dellabeneta.com"
     prometheus_port: 9090
     prometheus_scrape_interval: 15s
     # Node Exporter Full (grafana.com/grafana/dashboards/1860), revisão fixa
@@ -227,6 +229,7 @@
         content: |
           [Service]
           Environment=GF_SERVER_HTTP_PORT={{ grafana_port }}
+          Environment=GF_SERVER_ROOT_URL={{ grafana_root_url }}
           Environment=GF_ANALYTICS_REPORTING_ENABLED=false
           Environment=GF_ANALYTICS_CHECK_FOR_UPDATES=false
           Environment=GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
