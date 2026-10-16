@@ -52,7 +52,7 @@ groups:
       datasourceUid: prometheus
       model:
         refId: A
-        expr: max by (instance, name) (node_systemd_unit_state{job="node",name=~"k3s(-agent)?\.service",state="active"})
+        expr: max by (instance, name) (node_systemd_unit_state{job="node",name=~"k3s(-agent)?[.]service",state="active"})
         instant: true
         range: false
         intervalMs: 1000
@@ -87,7 +87,7 @@ groups:
       datasourceUid: prometheus
       model:
         refId: A
-        expr: max by (instance, name) (node_systemd_unit_state{job="node",name=~"cloudflared\.service",state="active"})
+        expr: max by (instance, name) (node_systemd_unit_state{job="node",name="cloudflared.service",state="active"})
         instant: true
         range: false
         intervalMs: 1000
